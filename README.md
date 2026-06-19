@@ -52,6 +52,19 @@ bluemap-integration:
 - **Java 21** or higher.
 - **HereEngy (Blueprint Plugin)** installed on the server.
 
+## Resource Pack Setup
+
+To render the custom Cloud Block correctly instead of the default brown mushroom block texture, a resource pack is required.
+
+Upon the first startup, HereSkyReign automatically extracts a pre-configured resource pack file to:
+`plugins/HereSkyReign/cloud_block_resourcepack.zip`
+
+### How to use:
+1. **Merge/Apply:** Unzip this file and merge its `assets/` folder with your server's existing resource pack.
+2. **Server Distribution:** Upload the `cloud_block_resourcepack.zip` to a public web host, and add the download URL to the `resource-pack` setting in your server's `server.properties`.
+
+---
+
 ## License
 
 This project is licensed under the GPLv3 License - see the [LICENSE](file:///d:/Development/Java/Minecraft%20Mods/HereSkyReign/LICENSE) file for details.

@@ -17,8 +17,17 @@ public final class HereSkyReignPlugin extends JavaPlugin {
         instance = this;
         saveDefaultConfig();
 
-        // Register teleportation listener
+        // Export cloud block resource pack for server admins
+        try {
+            saveResource("cloud_block_resourcepack.zip", false);
+            getLogger().info("Extracted cloud block resource pack to: plugins/HereSkyReign/cloud_block_resourcepack.zip");
+        } catch (IllegalArgumentException e) {
+            // Already exists or resource not found
+        }
+
+        // Register listeners
         getServer().getPluginManager().registerEvents(new TeleportationListener(this), this);
+        getServer().getPluginManager().registerEvents(new com.hereskyreign.hereskyreign.listener.CloudBlockListener(this), this);
 
         // Load or create the Sky Reign world
         String worldName = getConfig().getString("world-name", "sky_reign");
