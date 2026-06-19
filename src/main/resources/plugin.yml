@@ -1,0 +1,7 @@
+name: HereSkyReign
+version: '${version}'
+main: com.hereskyreign.hereskyreign.HereSkyReignPlugin
+description: Sky Reign Dimension Plugin - Custom floating island generation and seamless teleportation.
+api-version: '1.21'
+author: HereSkyReign
+depend: [HereEngy]

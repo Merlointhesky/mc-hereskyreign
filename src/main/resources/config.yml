@@ -1,0 +1,33 @@
+# HereSkyReign Configuration File
+
+world-name: "sky_reign"
+
+teleportation:
+  # Y level in the Overworld where players teleport to Sky Reign
+  overworld-to-skyreign-y: 320.0
+  # Y level in Sky Reign where players teleport back to the Overworld
+  skyreign-to-overworld-y: 0.0
+  # Cooldown in ticks (1 second = 20 ticks) between vertical teleports to prevent looping
+  cooldown-ticks: 100
+
+generation:
+  # Scale of the 2D simplex noise for floating islands
+  island-noise-scale: 0.015
+  # Threshold (higher = smaller/rarer islands, lower = larger/frequent islands)
+  island-noise-threshold: 0.1
+  # The vertical bounds of the cloud plane
+  island-min-y: 60
+  # The surface Y-level (top of cloud block plane)
+  island-max-y: 64
+
+structures:
+  # The chance (0.0 to 1.0) to spawn a Sky Village blueprint in a chunk
+  village-chance: 0.005
+  # The chance (0.0 to 1.0) to spawn a Coliseum blueprint in a chunk
+  coliseum-chance: 0.002
+
+# BlueMap Integration Settings
+bluemap-integration:
+  # Automatically generate configuration files for BlueMap to render this world
+  enabled: true
+
