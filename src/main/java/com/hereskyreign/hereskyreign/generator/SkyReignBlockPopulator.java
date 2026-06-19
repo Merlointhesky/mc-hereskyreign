@@ -74,6 +74,32 @@ public class SkyReignBlockPopulator extends BlockPopulator {
                     // Spawn a Multi-Building Village around a central Well and Bell focal point
                     placeWell(limitedRegion, originX, surfaceY, originZ);
                     
+                    // Spawn 3 central villagers around the well
+                    for (int i = 0; i < 3; i++) {
+                        int vx = originX + chunkRandom.nextInt(5) - 2;
+                        int vz = originZ + chunkRandom.nextInt(5) - 2;
+                        int vy = surfaceY + 1;
+                        if (vx == originX && vz == originZ) {
+                            vx += 1; // Don't spawn directly in the water center
+                        }
+                        
+                        org.bukkit.Location loc = new org.bukkit.Location(null, vx, vy, vz);
+                        if (limitedRegion.isInRegion(vx, vy, vz)) {
+                            try {
+                                org.bukkit.entity.Villager villager = limitedRegion.createEntity(loc, org.bukkit.entity.Villager.class);
+                                if (villager != null) {
+                                    org.bukkit.entity.Villager.Profession[] professions = org.bukkit.entity.Villager.Profession.values();
+                                    villager.setProfession(professions[chunkRandom.nextInt(professions.length)]);
+                                    villager.setVillagerLevel(chunkRandom.nextInt(3) + 1);
+                                    villager.setCustomName("§bSky Villager");
+                                    villager.setCustomNameVisible(true);
+                                }
+                            } catch (Exception e) {
+                                // Suppress
+                            }
+                        }
+                    }
+                    
                     // Conforming village houses offsets (within safe limitedRegion bounds)
                     int[][] offsets = {
                         {13, -1},  // East
@@ -172,6 +198,28 @@ public class SkyReignBlockPopulator extends BlockPopulator {
             int by = surfaceY + block.getY();
             int bz = originZ + block.getZ();
             setBlockIfInRegion(limitedRegion, bx, by, bz, block.getBlockData());
+        }
+
+        // Spawn a resident villager inside the house (at the floor level)
+        if (bpName.equals("village_house") || bpName.equals("white_village_house")) {
+            int vx = originX;
+            int vz = originZ;
+            int vy = surfaceY + 1;
+            org.bukkit.Location loc = new org.bukkit.Location(null, vx, vy, vz);
+            if (limitedRegion.isInRegion(vx, vy, vz)) {
+                try {
+                    org.bukkit.entity.Villager villager = limitedRegion.createEntity(loc, org.bukkit.entity.Villager.class);
+                    if (villager != null) {
+                        org.bukkit.entity.Villager.Profession[] professions = org.bukkit.entity.Villager.Profession.values();
+                        villager.setProfession(professions[random.nextInt(professions.length)]);
+                        villager.setVillagerLevel(random.nextInt(3) + 1);
+                        villager.setCustomName("§bSky Villager");
+                        villager.setCustomNameVisible(true);
+                    }
+                } catch (Exception e) {
+                    // Suppress
+                }
+            }
         }
     }
 
