@@ -41,19 +41,50 @@ public class SkyReignChunkGenerator extends ChunkGenerator {
         int minY = plugin.getConfig().getInt("generation.island-min-y", 60);
         int maxY = plugin.getConfig().getInt("generation.island-max-y", 64);
 
+        BlockData dirt = Bukkit.createBlockData(Material.DIRT);
+        BlockData grass = Bukkit.createBlockData(Material.GRASS_BLOCK);
+
+        // Adjust threshold for inset land
+        double landThreshold = threshold + 0.03;
+
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
                 double realX = (chunkX * 16) + x;
                 double realZ = (chunkZ * 16) + z;
 
-                // Evaluate 2D simplex noise
+                // Evaluate main 2D simplex noise
                 double noiseValue = noise.noise(realX * scale, realZ * scale);
+                // Evaluate high-frequency fluff noise for cloud edges
+                double fluffNoise = noise.noise(realX * 0.15, realZ * 0.15);
 
-                if (noiseValue > threshold) {
-                    // Generate flat cloud block plane
-                    for (int y = minY; y <= maxY; y++) {
-                        chunkData.setBlock(x, y, z, cloudBlockData);
+                boolean hasLand = noiseValue > landThreshold;
+
+                // Cloud placement checks (flared and fluffy)
+                boolean hasCloudY60 = noiseValue > threshold;
+                boolean hasCloudY59 = (noiseValue > (threshold - 0.04)) || (noiseValue > (threshold - 0.08) && fluffNoise > 0.0);
+                boolean hasCloudY58 = (noiseValue > (threshold - 0.08)) || (noiseValue > (threshold - 0.12) && fluffNoise > 0.0);
+                boolean hasCloudY57 = (noiseValue > (threshold - 0.08)) && fluffNoise > 0.3; // Hanging fluff clumps
+
+                // 1. Generate Land (Grass at maxY, Dirt from minY + 1 to maxY - 1)
+                if (hasLand) {
+                    chunkData.setBlock(x, maxY, z, grass);
+                    for (int y = minY + 1; y < maxY; y++) {
+                        chunkData.setBlock(x, y, z, dirt);
                     }
+                }
+
+                // 2. Generate Cloud Layer (3 rows + fluff underneath)
+                if (hasCloudY60) {
+                    chunkData.setBlock(x, minY, z, cloudBlockData); // Cloud Top (Y=60)
+                }
+                if (hasCloudY59) {
+                    chunkData.setBlock(x, minY - 1, z, cloudBlockData); // Cloud Middle (Y=59)
+                }
+                if (hasCloudY58) {
+                    chunkData.setBlock(x, minY - 2, z, cloudBlockData); // Cloud Bottom (Y=58)
+                }
+                if (hasCloudY57) {
+                    chunkData.setBlock(x, minY - 3, z, cloudBlockData); // Cloud Fluff (Y=57)
                 }
             }
         }
@@ -71,7 +102,7 @@ public class SkyReignChunkGenerator extends ChunkGenerator {
 
     @Override
     public boolean shouldGenerateDecorations() {
-        return false;
+        return true;
     }
 
     @Override
@@ -81,7 +112,7 @@ public class SkyReignChunkGenerator extends ChunkGenerator {
 
     @Override
     public boolean shouldGenerateStructures() {
-        return false;
+        return false; // Disable vanilla structures to prevent mineshafts in the void
     }
 
     @Override
