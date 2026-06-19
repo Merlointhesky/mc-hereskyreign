@@ -52,7 +52,6 @@ public final class HereSkyReignPlugin extends JavaPlugin {
         if (skyReignWorld != null && getConfig().getBoolean("bluemap-integration.enabled", true)) {
             setupBlueMap(worldName);
         }
-
         getLogger().info("HereSkyReign enabled!");
     }
 
