@@ -1,6 +1,6 @@
 # HereSkyReign
 
-A premium [Paper](https://papermc.io) Minecraft plugin that creates a floating-island dimension (**Sky Reign**) with seamless vertical teleportation, custom cloud block terrain, and organic procedural structure spawning using the [HereEngy](file:///d:/Development/Java/Minecraft%20Mods/HereEngy) Blueprint API.
+A premium [Paper](https://papermc.io) Minecraft plugin that creates a floating-island dimension (**Sky Reign**) with seamless vertical teleportation, custom cloud block terrain, and organic procedural structure spawning using the HereEngy Blueprint API.
 
 ## Features
 
