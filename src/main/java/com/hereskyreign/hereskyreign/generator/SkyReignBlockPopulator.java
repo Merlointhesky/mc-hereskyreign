@@ -1,26 +1,21 @@
 package com.hereskyreign.hereskyreign.generator;
 
-import com.hereengy.hereengy.HereEngyPlugin;
-import com.hereengy.hereengy.blueprint.Blueprint;
-import com.hereengy.hereengy.blueprint.BlueprintBlock;
 import com.hereskyreign.hereskyreign.HereSkyReignPlugin;
 import org.bukkit.Bukkit;
-import org.bukkit.block.structure.Mirror;
-import org.bukkit.block.structure.StructureRotation;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.entity.Villager;
 import org.bukkit.generator.BlockPopulator;
 import org.bukkit.generator.LimitedRegion;
 import org.bukkit.generator.WorldInfo;
 import org.bukkit.util.noise.SimplexNoiseGenerator;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class SkyReignBlockPopulator extends BlockPopulator {
 
     private final HereSkyReignPlugin plugin;
-    private final Map<String, Blueprint> blueprintCache = new ConcurrentHashMap<>();
 
     public SkyReignBlockPopulator(HereSkyReignPlugin plugin) {
         this.plugin = plugin;
@@ -61,70 +56,105 @@ public class SkyReignBlockPopulator extends BlockPopulator {
                 int originX = cx * 16 + chunkRandom.nextInt(16);
                 int originZ = cz * 16 + chunkRandom.nextInt(16);
 
-                // Verify there is actually a cloud island underneath this structure origin
-                double originNoise = noise.noise(originX * scale, originZ * scale);
-                if (originNoise <= threshold) {
-                    continue; // Skip, since the origin would float in empty air
-                }
-
                 if (spawnColiseum) {
-                    // Spawn single Coliseum
-                    placeHouse(limitedRegion, chunkRandom, originX, surfaceY, originZ, scale, threshold, noise, "coliseum");
+                    // Coliseum footprint: 30x30 centered at (originX, originZ)
+                    // Check all four outer corners of the 30x30 footprint to prevent spilling over void (radius 15)
+                    boolean fits = checkFootprintFits(noise, originX, originZ, 15, scale, threshold);
+                    if (!fits) {
+                        continue;
+                    }
+
+                    generateColiseum(limitedRegion, originX, surfaceY, originZ, chunkRandom);
                 } else {
+                    // Check if well center fits on the cloud
+                    double originNoise = noise.noise(originX * scale, originZ * scale);
+                    if (originNoise <= threshold) {
+                        continue; // Skip
+                    }
+
                     // Spawn a Multi-Building Village around a central Well and Bell focal point
                     placeWell(limitedRegion, originX, surfaceY, originZ);
                     
-                    // Spawn 3 central villagers around the well
-                    for (int i = 0; i < 3; i++) {
-                        int vx = originX + chunkRandom.nextInt(5) - 2;
-                        int vz = originZ + chunkRandom.nextInt(5) - 2;
-                        int vy = surfaceY + 1;
-                        if (vx == originX && vz == originZ) {
-                            vx += 1; // Don't spawn directly in the water center
-                        }
-                        
-                        org.bukkit.Location loc = new org.bukkit.Location(null, vx, vy, vz);
-                        if (limitedRegion.isInRegion(vx, vy, vz)) {
-                            try {
-                                org.bukkit.entity.Villager villager = limitedRegion.createEntity(loc, org.bukkit.entity.Villager.class);
-                                if (villager != null) {
-                                    org.bukkit.entity.Villager.Profession[] professions = org.bukkit.entity.Villager.Profession.values();
-                                    villager.setProfession(professions[chunkRandom.nextInt(professions.length)]);
-                                    villager.setVillagerLevel(chunkRandom.nextInt(3) + 1);
-                                    villager.setCustomName("§bSky Villager");
-                                    villager.setCustomNameVisible(true);
-                                }
-                            } catch (Exception e) {
-                                // Suppress
-                            }
-                        }
+                    // Spawn villagers near the well on the main server thread safely after generation
+                    if (cx == chunkX && cz == chunkZ) {
+                        spawnVillagerDelayed(worldInfo.getName(), originX, surfaceY + 1, originZ, 3, chunkRandom);
                     }
-                    
-                    // Conforming village houses offsets (within safe limitedRegion bounds)
-                    int[][] offsets = {
-                        {13, -1},  // East
-                        {-13, 1},  // West
-                        {1, 13},   // South
-                        {-1, -13}  // North
-                    };
-                    
-                    String[] blueprints = {"village_house", "white_village_house"};
-                    
-                    for (int[] offset : offsets) {
-                        int hx = originX + offset[0];
-                        int hz = originZ + offset[1];
-                        
-                        // Noise check at each target house position to ensure they generate on solid clouds
-                        if (noise.noise(hx * scale, hz * scale) > threshold) {
-                            String bpName = blueprints[chunkRandom.nextInt(blueprints.length)];
-                            placeHouse(limitedRegion, chunkRandom, hx, surfaceY, hz, scale, threshold, noise, bpName);
-                            // Draw path from focal well to house
-                            placePath(limitedRegion, originX, originZ, hx, hz, surfaceY - 1);
+
+                    // House placements and directions
+                    for (int dir = 0; dir < 4; dir++) {
+                        int hx, hz;
+                        String doorFacing;
+                        int pathStartX = originX, pathStartZ = originZ;
+                        int pathEndX, pathEndZ;
+                        boolean isCottage = (dir % 2 == 0); // Alternate house types
+                        int size = isCottage ? 8 : 7;
+                        int halfSize = size / 2; // For centering
+
+                        if (dir == 0) { // East
+                            hx = originX + 13;
+                            hz = originZ - halfSize;
+                            doorFacing = "west";
+                            pathStartX = originX + 2;
+                            pathEndX = hx - 1;
+                            pathStartZ = originZ;
+                            pathEndZ = originZ;
+                        } else if (dir == 1) { // West
+                            hx = originX - 13 - (size - 1);
+                            hz = originZ - halfSize;
+                            doorFacing = "east";
+                            pathStartX = originX - 2;
+                            pathEndX = hx + size;
+                            pathStartZ = originZ;
+                            pathEndZ = originZ;
+                        } else if (dir == 2) { // South
+                            hx = originX - halfSize;
+                            hz = originZ + 13;
+                            doorFacing = "north";
+                            pathStartX = originX;
+                            pathEndX = originX;
+                            pathStartZ = originZ + 2;
+                            pathEndZ = hz - 1;
+                        } else { // North
+                            hx = originX - halfSize;
+                            hz = originZ - 13 - (size - 1);
+                            doorFacing = "south";
+                            pathStartX = originX;
+                            pathEndX = originX;
+                            pathStartZ = originZ - 2;
+                            pathEndZ = hz + size;
+                        }
+
+                        // Check if house footprint fits on the cloud island (radius = halfSize + 1)
+                        boolean houseFits = checkFootprintFits(noise, hx + halfSize, hz + halfSize, halfSize + 1, scale, threshold);
+                        if (houseFits) {
+                            // Draw straight path from well to the door step (2-3 blocks wide, cleared of grass)
+                            drawStraightPath(limitedRegion, pathStartX, pathStartZ, pathEndX, pathEndZ, surfaceY - 1, chunkRandom);
+
+                            if (isCottage) {
+                                generateCottage(limitedRegion, hx, surfaceY, hz, doorFacing, chunkRandom);
+                            } else {
+                                generateStonebrickHouse(limitedRegion, hx, surfaceY, hz, doorFacing, chunkRandom);
+                            }
+
+                            // Spawn resident villager inside the house
+                            int vx = hx + halfSize;
+                            int vz = hz + halfSize;
+                            if ((vx >> 4) == chunkX && (vz >> 4) == chunkZ) {
+                                spawnVillagerDelayed(worldInfo.getName(), vx, surfaceY + 1, vz, 1, chunkRandom);
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    private boolean checkFootprintFits(SimplexNoiseGenerator noise, int cx, int cz, int radius, double scale, double threshold) {
+        // Checks four corners at the given footprint radius to guarantee the structure does not spill into void
+        return noise.noise((cx - radius) * scale, (cz - radius) * scale) > threshold
+            && noise.noise((cx + radius) * scale, (cz - radius) * scale) > threshold
+            && noise.noise((cx - radius) * scale, (cz + radius) * scale) > threshold
+            && noise.noise((cx + radius) * scale, (cz + radius) * scale) > threshold;
     }
 
     private void placeWell(LimitedRegion limitedRegion, int x, int y, int z) {
@@ -164,93 +194,377 @@ public class SkyReignBlockPopulator extends BlockPopulator {
         setBlockIfInRegion(limitedRegion, x, y + 2, z, "minecraft:bell[attachment=ceiling,facing=north]");
     }
 
-    private void placeHouse(LimitedRegion limitedRegion, Random random, int originX, int surfaceY, int originZ, double scale, double threshold, SimplexNoiseGenerator noise, String bpName) {
-        // Roll rotation and mirror
-        int rotIndex = random.nextInt(4);
-        StructureRotation rotation = StructureRotation.values()[rotIndex];
-
-        int mirrorIndex = random.nextInt(3);
-        Mirror mirror = null;
-        if (mirrorIndex == 1) {
-            mirror = Mirror.LEFT_RIGHT;
-        } else if (mirrorIndex == 2) {
-            mirror = Mirror.FRONT_BACK;
+    private void generateCottage(LimitedRegion limitedRegion, int x, int y, int z, String doorFacing, Random random) {
+        // Footprint: 8x8. Base starts at y.
+        // 1. Floor
+        for (int dx = 0; dx < 8; dx++) {
+            for (int dz = 0; dz < 8; dz++) {
+                setBlockIfInRegion(limitedRegion, x + dx, y, z + dz, "minecraft:spruce_planks");
+            }
         }
-
-        // Load blueprint from HereEngy (uses our public loadBlueprint API)
-        Blueprint bp = getOrLoadBlueprint(bpName);
-        if (bp == null) {
-            return;
+        
+        // 2. Pillars at corners (Oak Log axis=y)
+        for (int dy = 1; dy <= 4; dy++) {
+            setBlockIfInRegion(limitedRegion, x, y + dy, z, "minecraft:oak_log[axis=y]");
+            setBlockIfInRegion(limitedRegion, x + 7, y + dy, z, "minecraft:oak_log[axis=y]");
+            setBlockIfInRegion(limitedRegion, x, y + dy, z + 7, "minecraft:oak_log[axis=y]");
+            setBlockIfInRegion(limitedRegion, x + 7, y + dy, z + 7, "minecraft:oak_log[axis=y]");
         }
-
-        // Apply mirror first, then rotation (mathematically correct order for absolute world-axis operations)
-        Blueprint transformed = bp;
-        if (mirror != null) {
-            transformed = com.hereengy.hereengy.blueprint.BlueprintManager.mirrorBlueprint(transformed, mirror);
+        
+        // 3. Walls (Oak planks)
+        for (int dy = 1; dy <= 4; dy++) {
+            for (int i = 1; i < 7; i++) {
+                setBlockIfInRegion(limitedRegion, x + i, y + dy, z, "minecraft:oak_planks");
+                setBlockIfInRegion(limitedRegion, x + i, y + dy, z + 7, "minecraft:oak_planks");
+                setBlockIfInRegion(limitedRegion, x, y + dy, z + i, "minecraft:oak_planks");
+                setBlockIfInRegion(limitedRegion, x + 7, y + dy, z + i, "minecraft:oak_planks");
+            }
         }
-        if (rotation != StructureRotation.NONE) {
-            transformed = com.hereengy.hereengy.blueprint.BlueprintManager.rotateBlueprint(transformed, rotation);
+        
+        // 4. Windows (glass blocks)
+        if (!doorFacing.equals("north")) {
+            setBlockIfInRegion(limitedRegion, x + 3, y + 2, z, "minecraft:glass");
+            setBlockIfInRegion(limitedRegion, x + 4, y + 2, z, "minecraft:glass");
         }
-
-        // Paste blocks only within the loaded region
-        for (BlueprintBlock block : transformed.getBlocks()) {
-            int bx = originX + block.getX();
-            int by = surfaceY + block.getY();
-            int bz = originZ + block.getZ();
-            setBlockIfInRegion(limitedRegion, bx, by, bz, block.getBlockData());
+        if (!doorFacing.equals("south")) {
+            setBlockIfInRegion(limitedRegion, x + 3, y + 2, z + 7, "minecraft:glass");
+            setBlockIfInRegion(limitedRegion, x + 4, y + 2, z + 7, "minecraft:glass");
         }
+        if (!doorFacing.equals("west")) {
+            setBlockIfInRegion(limitedRegion, x, y + 2, z + 3, "minecraft:glass");
+            setBlockIfInRegion(limitedRegion, x, y + 2, z + 4, "minecraft:glass");
+        }
+        if (!doorFacing.equals("east")) {
+            setBlockIfInRegion(limitedRegion, x + 7, y + 2, z + 3, "minecraft:glass");
+            setBlockIfInRegion(limitedRegion, x + 7, y + 2, z + 4, "minecraft:glass");
+        }
+        
+        // 5. Door & Stairs to ground
+        int doorX = 0, doorZ = 0;
+        String stairBlock = "minecraft:oak_stairs";
+        if (doorFacing.equals("west")) {
+            doorX = x; doorZ = z + 3;
+            setBlockIfInRegion(limitedRegion, doorX - 1, y, doorZ, stairBlock + "[facing=east]");
+            setBlockIfInRegion(limitedRegion, doorX - 1, y + 1, doorZ, "minecraft:air");
+            setBlockIfInRegion(limitedRegion, doorX - 1, y + 2, doorZ, "minecraft:air");
+        } else if (doorFacing.equals("east")) {
+            doorX = x + 7; doorZ = z + 3;
+            setBlockIfInRegion(limitedRegion, doorX + 1, y, doorZ, stairBlock + "[facing=west]");
+            setBlockIfInRegion(limitedRegion, doorX + 1, y + 1, doorZ, "minecraft:air");
+            setBlockIfInRegion(limitedRegion, doorX + 1, y + 2, doorZ, "minecraft:air");
+        } else if (doorFacing.equals("north")) {
+            doorX = x + 3; doorZ = z;
+            setBlockIfInRegion(limitedRegion, doorX, y, doorZ - 1, stairBlock + "[facing=south]");
+            setBlockIfInRegion(limitedRegion, doorX, y + 1, doorZ - 1, "minecraft:air");
+            setBlockIfInRegion(limitedRegion, doorX, y + 2, doorZ - 1, "minecraft:air");
+        } else { // south
+            doorX = x + 3; doorZ = z + 7;
+            setBlockIfInRegion(limitedRegion, doorX, y, doorZ + 1, stairBlock + "[facing=north]");
+            setBlockIfInRegion(limitedRegion, doorX, y + 1, doorZ + 1, "minecraft:air");
+            setBlockIfInRegion(limitedRegion, doorX, y + 2, doorZ + 1, "minecraft:air");
+        }
+        
+        setBlockIfInRegion(limitedRegion, doorX, y + 1, doorZ, "minecraft:oak_door[facing=" + doorFacing + ",half=lower]");
+        setBlockIfInRegion(limitedRegion, doorX, y + 2, doorZ, "minecraft:oak_door[facing=" + doorFacing + ",half=upper]");
+        
+        // 6. Bed (aligned properly facing north, head at z + 1, foot at z + 2)
+        setBlockIfInRegion(limitedRegion, x + 2, y + 1, z + 1, "minecraft:red_bed[part=head,facing=north]");
+        setBlockIfInRegion(limitedRegion, x + 2, y + 1, z + 2, "minecraft:red_bed[part=foot,facing=north]");
+        
+        // 7. Roof (sloped oak stairs facing north/south or east/west)
+        for (int dz = 0; dz < 8; dz++) {
+            setBlockIfInRegion(limitedRegion, x, y + 5, z + dz, "minecraft:oak_stairs[facing=east]");
+            setBlockIfInRegion(limitedRegion, x + 1, y + 5, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 2, y + 5, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 3, y + 5, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 4, y + 5, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 5, y + 5, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 6, y + 5, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 7, y + 5, z + dz, "minecraft:oak_stairs[facing=west]");
+        }
+        for (int dz = 0; dz < 8; dz++) {
+            setBlockIfInRegion(limitedRegion, x + 1, y + 6, z + dz, "minecraft:oak_stairs[facing=east]");
+            setBlockIfInRegion(limitedRegion, x + 2, y + 6, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 3, y + 6, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 4, y + 6, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 5, y + 6, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 6, y + 6, z + dz, "minecraft:oak_stairs[facing=west]");
+        }
+        for (int dz = 0; dz < 8; dz++) {
+            setBlockIfInRegion(limitedRegion, x + 2, y + 7, z + dz, "minecraft:oak_stairs[facing=east]");
+            setBlockIfInRegion(limitedRegion, x + 3, y + 7, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 4, y + 7, z + dz, "minecraft:oak_planks");
+            setBlockIfInRegion(limitedRegion, x + 5, y + 7, z + dz, "minecraft:oak_stairs[facing=west]");
+        }
+        for (int dz = 0; dz < 8; dz++) {
+            setBlockIfInRegion(limitedRegion, x + 3, y + 8, z + dz, "minecraft:oak_slab[type=bottom]");
+            setBlockIfInRegion(limitedRegion, x + 4, y + 8, z + dz, "minecraft:oak_slab[type=bottom]");
+        }
+    }
 
-        // Spawn a resident villager inside the house (at the floor level)
-        if (bpName.equals("village_house") || bpName.equals("white_village_house")) {
-            int vx = originX;
-            int vz = originZ;
-            int vy = surfaceY + 1;
-            org.bukkit.Location loc = new org.bukkit.Location(null, vx, vy, vz);
-            if (limitedRegion.isInRegion(vx, vy, vz)) {
-                try {
-                    org.bukkit.entity.Villager villager = limitedRegion.createEntity(loc, org.bukkit.entity.Villager.class);
-                    if (villager != null) {
-                        org.bukkit.entity.Villager.Profession[] professions = org.bukkit.entity.Villager.Profession.values();
-                        villager.setProfession(professions[random.nextInt(professions.length)]);
-                        villager.setVillagerLevel(random.nextInt(3) + 1);
-                        villager.setCustomName("§bSky Villager");
-                        villager.setCustomNameVisible(true);
+    private void generateStonebrickHouse(LimitedRegion limitedRegion, int x, int y, int z, String doorFacing, Random random) {
+        // Footprint: 7x7. Base starts at y.
+        // 1. Floor
+        for (int dx = 0; dx < 7; dx++) {
+            for (int dz = 0; dz < 7; dz++) {
+                setBlockIfInRegion(limitedRegion, x + dx, y, z + dz, "minecraft:stone_bricks");
+            }
+        }
+        
+        // 2. Walls (Stone bricks and cracked stone bricks mixed)
+        for (int dy = 1; dy <= 4; dy++) {
+            for (int dx = 0; dx < 7; dx++) {
+                for (int dz = 0; dz < 7; dz++) {
+                    if (dx == 0 || dx == 6 || dz == 0 || dz == 6) {
+                        String mat = (random.nextDouble() < 0.25) ? "minecraft:cracked_stone_bricks" : "minecraft:stone_bricks";
+                        setBlockIfInRegion(limitedRegion, x + dx, y + dy, z + dz, mat);
                     }
-                } catch (Exception e) {
-                    // Suppress
+                }
+            }
+        }
+        
+        // 3. Windows (glass blocks)
+        if (!doorFacing.equals("north")) {
+            setBlockIfInRegion(limitedRegion, x + 3, y + 2, z, "minecraft:glass");
+        }
+        if (!doorFacing.equals("south")) {
+            setBlockIfInRegion(limitedRegion, x + 3, y + 2, z + 6, "minecraft:glass");
+        }
+        if (!doorFacing.equals("west")) {
+            setBlockIfInRegion(limitedRegion, x, y + 2, z + 3, "minecraft:glass");
+        }
+        if (!doorFacing.equals("east")) {
+            setBlockIfInRegion(limitedRegion, x + 6, y + 2, z + 3, "minecraft:glass");
+        }
+        
+        // 4. Door & Stairs to ground
+        int doorX = 0, doorZ = 0;
+        String stairBlock = "minecraft:stone_brick_stairs";
+        if (doorFacing.equals("west")) {
+            doorX = x; doorZ = z + 3;
+            setBlockIfInRegion(limitedRegion, doorX - 1, y, doorZ, stairBlock + "[facing=east]");
+            setBlockIfInRegion(limitedRegion, doorX - 1, y + 1, doorZ, "minecraft:air");
+            setBlockIfInRegion(limitedRegion, doorX - 1, y + 2, doorZ, "minecraft:air");
+        } else if (doorFacing.equals("east")) {
+            doorX = x + 6; doorZ = z + 3;
+            setBlockIfInRegion(limitedRegion, doorX + 1, y, doorZ, stairBlock + "[facing=west]");
+            setBlockIfInRegion(limitedRegion, doorX + 1, y + 1, doorZ, "minecraft:air");
+            setBlockIfInRegion(limitedRegion, doorX + 1, y + 2, doorZ, "minecraft:air");
+        } else if (doorFacing.equals("north")) {
+            doorX = x + 3; doorZ = z;
+            setBlockIfInRegion(limitedRegion, doorX, y, doorZ - 1, stairBlock + "[facing=south]");
+            setBlockIfInRegion(limitedRegion, doorX, y + 1, doorZ - 1, "minecraft:air");
+            setBlockIfInRegion(limitedRegion, doorX, y + 2, doorZ - 1, "minecraft:air");
+        } else { // south
+            doorX = x + 3; doorZ = z + 6;
+            setBlockIfInRegion(limitedRegion, doorX, y, doorZ + 1, stairBlock + "[facing=north]");
+            setBlockIfInRegion(limitedRegion, doorX, y + 1, doorZ + 1, "minecraft:air");
+            setBlockIfInRegion(limitedRegion, doorX, y + 2, doorZ + 1, "minecraft:air");
+        }
+        
+        setBlockIfInRegion(limitedRegion, doorX, y + 1, doorZ, "minecraft:spruce_door[facing=" + doorFacing + ",half=lower]");
+        setBlockIfInRegion(limitedRegion, doorX, y + 2, doorZ, "minecraft:spruce_door[facing=" + doorFacing + ",half=upper]");
+        
+        // 5. Bed (aligned properly facing north, head at z + 1, foot at z + 2)
+        setBlockIfInRegion(limitedRegion, x + 2, y + 1, z + 1, "minecraft:red_bed[part=head,facing=north]");
+        setBlockIfInRegion(limitedRegion, x + 2, y + 1, z + 2, "minecraft:red_bed[part=foot,facing=north]");
+        
+        // 6. Roof: Flat Stone Brick Slabs with cobblestone stairs trim
+        for (int dx = -1; dx <= 7; dx++) {
+            for (int dz = -1; dz <= 7; dz++) {
+                boolean isEdge = (dx == -1 || dx == 7 || dz == -1 || dz == 7);
+                if (isEdge) {
+                    String stairData = "minecraft:cobblestone_stairs";
+                    if (dx == -1) stairData += "[facing=east]";
+                    else if (dx == 7) stairData += "[facing=west]";
+                    else if (dz == -1) stairData += "[facing=south]";
+                    else if (dz == 7) stairData += "[facing=north]";
+                    
+                    setBlockIfInRegion(limitedRegion, x + dx, y + 5, z + dz, stairData);
+                } else {
+                    setBlockIfInRegion(limitedRegion, x + dx, y + 5, z + dz, "minecraft:stone_brick_slab[type=bottom]");
                 }
             }
         }
     }
 
-    private void placePath(LimitedRegion limitedRegion, int x1, int z1, int x2, int z2, int y) {
-        // Simple Bresenham's line algorithm to lay gravel/path block connections
-        int dx = Math.abs(x2 - x1);
-        int dz = Math.abs(z2 - z1);
-        int sx = x1 < x2 ? 1 : -1;
-        int sz = z1 < z2 ? 1 : -1;
-        int err = dx - dz;
+    private void generateColiseum(LimitedRegion limitedRegion, int x, int y, int z, Random random) {
+        // Footprint: 30x30 circular colosseum centered at (x, z)
+        // Outer wall radius: 15
         
-        int x = x1;
-        int z = z1;
+        String cloudBlock = "minecraft:brown_mushroom_block[up=false,down=false,north=false,south=false,east=false,west=false]";
         
-        while (true) {
-            // Place path block, skipping immediate start and ends
-            if ((x != x1 || z != z1) && (x != x2 || z != z2)) {
-                setBlockIfInRegion(limitedRegion, x, y, z, "minecraft:dirt_path");
-            }
-            
-            if (x == x2 && z == z2) break;
-            int e2 = 2 * err;
-            if (e2 > -dz) {
-                err -= dz;
-                x += sx;
-            }
-            if (e2 < dx) {
-                err += dx;
-                z += sz;
+        for (int dx = -15; dx <= 15; dx++) {
+            for (int dz = -15; dz <= 15; dz++) {
+                int px = x + dx;
+                int pz = z + dz;
+                int d2 = dx * dx + dz * dz;
+                
+                if (d2 > 225) continue; // Outside 30x30 circle
+                
+                // 1. Clear air space above the entire colosseum area
+                for (int dy = 1; dy <= 8; dy++) {
+                    setBlockIfInRegion(limitedRegion, px, y + dy, pz, "minecraft:air");
+                }
+                
+                if (d2 >= 196) {
+                    // Outer Wall & Pillars (Y = y to y + 5)
+                    boolean isPillar = (dx * dz) % 3 == 0;
+                    if (isPillar) {
+                        for (int dy = 0; dy <= 5; dy++) {
+                            String mat = (random.nextDouble() < 0.2) ? "minecraft:cracked_stone_bricks" : "minecraft:stone_bricks";
+                            setBlockIfInRegion(limitedRegion, px, y + dy, pz, mat);
+                        }
+                        // Cloud rim on top of pillars
+                        setBlockIfInRegion(limitedRegion, px, y + 6, pz, cloudBlock);
+                    } else {
+                        setBlockIfInRegion(limitedRegion, px, y, pz, "minecraft:cobblestone");
+                        setBlockIfInRegion(limitedRegion, px, y + 1, pz, "minecraft:stone_brick_wall");
+                        setBlockIfInRegion(limitedRegion, px, y + 2, pz, "minecraft:stone_brick_wall");
+                        setBlockIfInRegion(limitedRegion, px, y + 3, pz, "minecraft:stone_brick_wall");
+                        setBlockIfInRegion(limitedRegion, px, y + 4, pz, "minecraft:stone_brick_slab[type=bottom]");
+                        // Cloud rim on top of walls
+                        setBlockIfInRegion(limitedRegion, px, y + 5, pz, cloudBlock);
+                    }
+                } else if (d2 >= 64) {
+                    // Seating Areas (Stone Brick Stairs facing inwards)
+                    String dir;
+                    if (Math.abs(dx) > Math.abs(dz)) {
+                        dir = (dx < 0) ? "east" : "west";
+                    } else {
+                        dir = (dz < 0) ? "south" : "north";
+                    }
+                    
+                    if (d2 >= 144) {
+                        // Tier 3
+                        setBlockIfInRegion(limitedRegion, px, y, pz, "minecraft:stone_bricks");
+                        setBlockIfInRegion(limitedRegion, px, y + 1, pz, "minecraft:stone_bricks");
+                        setBlockIfInRegion(limitedRegion, px, y + 2, pz, "minecraft:stone_bricks");
+                        setBlockIfInRegion(limitedRegion, px, y + 3, pz, "minecraft:stone_brick_stairs[facing=" + dir + "]");
+                    } else if (d2 >= 100) {
+                        // Tier 2
+                        setBlockIfInRegion(limitedRegion, px, y, pz, "minecraft:stone_bricks");
+                        setBlockIfInRegion(limitedRegion, px, y + 1, pz, "minecraft:stone_bricks");
+                        setBlockIfInRegion(limitedRegion, px, y + 2, pz, "minecraft:stone_brick_stairs[facing=" + dir + "]");
+                    } else {
+                        // Tier 1
+                        setBlockIfInRegion(limitedRegion, px, y, pz, "minecraft:stone_bricks");
+                        setBlockIfInRegion(limitedRegion, px, y + 1, pz, "minecraft:stone_brick_stairs[facing=" + dir + "]");
+                    }
+                } else {
+                    // Arena Floor (Y = y) - replaced with Cloud Blocks
+                    // Center 4x4 has polished stone bricks decoration
+                    if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2) {
+                        String centerMat = (dx == 0 || dz == 0) ? "minecraft:chiseled_stone_bricks" : "minecraft:polished_andesite";
+                        setBlockIfInRegion(limitedRegion, px, y, pz, centerMat);
+                    } else {
+                        setBlockIfInRegion(limitedRegion, px, y, pz, cloudBlock);
+                    }
+                }
             }
         }
+        
+        // Entrances: Clear a 3-block wide passage at East/West and North/South axes
+        for (int dy = 0; dy <= 5; dy++) {
+            for (int dAxis = -15; dAxis <= 15; dAxis++) {
+                for (int dOff = -1; dOff <= 1; dOff++) {
+                    int dist2_ew = dAxis * dAxis + dOff * dOff;
+                    if (dist2_ew >= 64) {
+                        setBlockIfInRegion(limitedRegion, x + dAxis, y + dy, z + dOff, "minecraft:air");
+                    }
+                    int dist2_ns = dOff * dOff + dAxis * dAxis;
+                    if (dist2_ns >= 64) {
+                        setBlockIfInRegion(limitedRegion, x + dOff, y + dy, z + dAxis, "minecraft:air");
+                    }
+                }
+            }
+        }
+
+        // Place stairs at the entrance thresholds going up into the arena (ground is y - 1, arena floor is y)
+        for (int dOff = -1; dOff <= 1; dOff++) {
+            // West entrance (dx = -15)
+            setBlockIfInRegion(limitedRegion, x - 15, y, z + dOff, "minecraft:stone_brick_stairs[facing=east]");
+            setBlockIfInRegion(limitedRegion, x - 15, y + 1, z + dOff, "minecraft:air");
+
+            // East entrance (dx = 15)
+            setBlockIfInRegion(limitedRegion, x + 15, y, z + dOff, "minecraft:stone_brick_stairs[facing=west]");
+            setBlockIfInRegion(limitedRegion, x + 15, y + 1, z + dOff, "minecraft:air");
+
+            // North entrance (dz = -15)
+            setBlockIfInRegion(limitedRegion, x + dOff, y, z - 15, "minecraft:stone_brick_stairs[facing=south]");
+            setBlockIfInRegion(limitedRegion, x + dOff, y + 1, z - 15, "minecraft:air");
+
+            // South entrance (dz = 15)
+            setBlockIfInRegion(limitedRegion, x + dOff, y, z + 15, "minecraft:stone_brick_stairs[facing=north]");
+            setBlockIfInRegion(limitedRegion, x + dOff, y + 1, z + 15, "minecraft:air");
+        }
+    }
+
+    private void drawStraightPath(LimitedRegion limitedRegion, int x1, int z1, int x2, int z2, int y, Random random) {
+        int minX = Math.min(x1, x2);
+        int maxX = Math.max(x1, x2);
+        int minZ = Math.min(z1, z2);
+        int maxZ = Math.max(z1, z2);
+
+        if (minX == maxX) {
+            // Vertical path along Z axis
+            for (int z = minZ; z <= maxZ; z++) {
+                int width = random.nextInt(2) + 2; // 2 or 3 blocks wide
+                if (width == 2) {
+                    setPathBlock(limitedRegion, minX, y, z);
+                    setPathBlock(limitedRegion, minX + 1, y, z);
+                } else {
+                    setPathBlock(limitedRegion, minX - 1, y, z);
+                    setPathBlock(limitedRegion, minX, y, z);
+                    setPathBlock(limitedRegion, minX + 1, y, z);
+                }
+            }
+        } else if (minZ == maxZ) {
+            // Horizontal path along X axis
+            for (int x = minX; x <= maxX; x++) {
+                int width = random.nextInt(2) + 2; // 2 or 3 blocks wide
+                if (width == 2) {
+                    setPathBlock(limitedRegion, x, y, minZ);
+                    setPathBlock(limitedRegion, x, y, minZ + 1);
+                } else {
+                    setPathBlock(limitedRegion, x, y, minZ - 1);
+                    setPathBlock(limitedRegion, x, y, minZ);
+                    setPathBlock(limitedRegion, x, y, minZ + 1);
+                }
+            }
+        }
+    }
+
+    private void setPathBlock(LimitedRegion limitedRegion, int x, int y, int z) {
+        setBlockIfInRegion(limitedRegion, x, y, z, "minecraft:dirt_path");
+        setBlockIfInRegion(limitedRegion, x, y + 1, z, "minecraft:air"); // Clear foliage
+    }
+
+    private void spawnVillagerDelayed(String worldName, int x, int y, int z, int count, Random random) {
+        // Schedules entity spawning on the main thread shortly after chunk loads to avoid entity persistence bugs
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            World world = Bukkit.getWorld(worldName);
+            if (world != null) {
+                world.getChunkAtAsync(x >> 4, z >> 4).thenAccept(chunk -> {
+                    java.util.List<Villager.Profession> professions = org.bukkit.Registry.VILLAGER_PROFESSION.stream().toList();
+                    for (int i = 0; i < count; i++) {
+                        int vx = x + (count > 1 ? random.nextInt(3) - 1 : 0);
+                        int vz = z + (count > 1 ? random.nextInt(3) - 1 : 0);
+                        Location loc = new Location(world, vx, y, vz);
+                        
+                        try {
+                            Villager villager = world.spawn(loc, Villager.class);
+                            if (villager != null) {
+                                villager.setProfession(professions.get(random.nextInt(professions.size())));
+                                villager.setVillagerLevel(random.nextInt(3) + 1);
+                            }
+                        } catch (Exception e) {
+                            // Suppress spawning failures
+                        }
+                    }
+                });
+            }
+        }, 20L); // 1 second delay
     }
 
     private void setBlockIfInRegion(LimitedRegion limitedRegion, int x, int y, int z, String blockDataStr) {
@@ -261,25 +575,5 @@ public class SkyReignBlockPopulator extends BlockPopulator {
                 // Suppress placement failures
             }
         }
-    }
-
-    private Blueprint getOrLoadBlueprint(String name) {
-        return blueprintCache.computeIfAbsent(name.toLowerCase(), key -> {
-            try {
-                HereEngyPlugin engy = HereEngyPlugin.getInstance();
-                if (engy != null && engy.getBlueprintManager() != null) {
-                    Blueprint bp = engy.getBlueprintManager().loadBlueprint(key);
-                    if (bp == null) {
-                        plugin.getLogger().warning("Blueprint '" + key + "' was not found in HereEngy/blueprints folder!");
-                    }
-                    return bp;
-                } else {
-                    plugin.getLogger().warning("HereEngy plugin is not active or initialized yet!");
-                }
-            } catch (Exception e) {
-                plugin.getLogger().warning("Failed to fetch blueprint '" + name + "': " + e.getMessage());
-            }
-            return null;
-        });
     }
 }
