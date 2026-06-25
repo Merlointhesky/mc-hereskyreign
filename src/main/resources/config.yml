@@ -31,3 +31,14 @@ bluemap-integration:
   # Automatically generate configuration files for BlueMap to render this world
   enabled: true
 
+# Coliseum Combat Settings
+combat:
+  # The respawn cooldown for colosseum guards in hours
+  respawn-cooldown-hours: 2.0
+  # The number of guards to spawn inside the colosseum (normally 3-5)
+  guard-count: 4
+  # Size scale of the Boss Phantom (default 12)
+  boss-phantom-size: 12
+  # Cooldown in ticks between boss spell casts (20 ticks = 1 second, 200 ticks = 10 seconds)
+  boss-spell-cooldown-ticks: 200
+

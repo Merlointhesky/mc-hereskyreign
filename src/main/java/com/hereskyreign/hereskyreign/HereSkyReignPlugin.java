@@ -2,6 +2,7 @@ package com.hereskyreign.hereskyreign;
 
 import com.hereskyreign.hereskyreign.generator.SkyReignChunkGenerator;
 import com.hereskyreign.hereskyreign.listener.TeleportationListener;
+import com.hereskyreign.hereskyreign.coliseum.ColiseumManager;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
@@ -11,6 +12,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class HereSkyReignPlugin extends JavaPlugin {
 
     private static HereSkyReignPlugin instance;
+    private ColiseumManager coliseumManager;
 
     @Override
     public void onEnable() {
@@ -24,6 +26,9 @@ public final class HereSkyReignPlugin extends JavaPlugin {
         } catch (IllegalArgumentException e) {
             // Already exists or resource not found
         }
+
+        // Initialize Coliseum Manager
+        this.coliseumManager = new ColiseumManager(this);
 
         // Register listeners
         getServer().getPluginManager().registerEvents(new TeleportationListener(this), this);
@@ -119,11 +124,18 @@ public final class HereSkyReignPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (coliseumManager != null) {
+            coliseumManager.cleanup();
+        }
         getLogger().info("HereSkyReign disabled!");
     }
 
     public static HereSkyReignPlugin getInstance() {
         return instance;
+    }
+
+    public ColiseumManager getColiseumManager() {
+        return coliseumManager;
     }
 
     @Override

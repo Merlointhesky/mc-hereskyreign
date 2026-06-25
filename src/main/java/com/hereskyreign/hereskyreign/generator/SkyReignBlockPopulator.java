@@ -65,6 +65,16 @@ public class SkyReignBlockPopulator extends BlockPopulator {
                     }
 
                     generateColiseum(limitedRegion, originX, surfaceY, originZ, chunkRandom);
+
+                    // Register coliseum center on the main thread after chunk generation
+                    int finalX = originX;
+                    int finalZ = originZ;
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        World world = Bukkit.getWorld(worldInfo.getName());
+                        if (world != null) {
+                            plugin.getColiseumManager().addColiseum(new Location(world, finalX, surfaceY, finalZ));
+                        }
+                    }, 20L);
                 } else {
                     // Check if well center fits on the cloud
                     double originNoise = noise.noise(originX * scale, originZ * scale);
